@@ -3,6 +3,8 @@ import './index.css';
 import { db } from './firebase';
 import { collection, addDoc, onSnapshot, orderBy, query, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 
+import { Button, TextField } from "@mui/material";
+import { Container, Card, CardContent, Typography } from "@mui/material";
 
 let sharedAudioCtx = null;
 
@@ -159,36 +161,39 @@ function App() {
   };
 
   return (
-    <div className="app-container">
-      <h1>PillAlert</h1>
-      
-      <div className="status-bubble">
-        <span style={{ marginRight: '6px', fontSize: '1.2em' }}>⚡</span>
-        {backendMessage ? backendMessage : 'Waiting for backend...'}
-      </div>
+    <Container maxWidth="md" sx={{ mt: 5 }}>
+      <Card sx={{ borderRadius: 4, boxShadow: 6 }}>
+        <CardContent>
+          <div className="app-container">
+            <Typography variant="h4" component="h1" gutterBottom align="center" sx={{ fontWeight: 'bold', color: 'primary.main', mb: 3 }}>
+              PillAlert
+            </Typography>
+                     
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label>Medication Name</label>
-          <input 
-            type="text" 
-            name="name" 
-            placeholder="e.g. Lisinopril 20mg"
-            value={formData.name} 
-            onChange={handleChange} 
-            required
-          />
+          <TextField
+          fullWidth
+          label="Medication Name"
+          name="name"
+          value={formData.name}
+          onChange={handleChange}
+          margin="normal"
+          /> 
         </div>
 
         <div className="form-group">
           <label>Instructions</label>
-          <textarea 
-            name="instruction" 
-            placeholder="e.g. Take one tablet by mouth daily in the morning"
-            value={formData.instruction} 
-            onChange={handleChange} 
-            rows={3}
-            required
+          <TextField
+          fullWidth
+          label="Instruction"
+          name="instruction"
+          value={formData.instruction}
+          onChange={handleChange}
+          margin="normal"
+          multiline
+          rows={3}
           />
         </div>
 
@@ -217,7 +222,9 @@ function App() {
           </div>
         </div>
 
-        <button type="submit">Add Medication</button>
+        <Button variant="contained" type="submit" fullWidth sx={{ mt: 2 }}>
+         Add Medication
+        </Button>
       </form>
 
       <div className="medications-list">
@@ -228,75 +235,75 @@ function App() {
           medications.map((med) => {
             const remaining = (med.totalPills || 0) - (med.pillsTaken || 0);
             return (
-              <div key={med.id} className="med-card">
-              <div className="med-header">
-                <span className="med-name">{med.name}</span>
-                <button 
-                  onClick={() => handleDelete(med.id)} 
-                  className="delete-btn" 
-                  aria-label="Delete"
-                  title="Delete medication"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="med-instruction">{med.instruction}</div>
-              
-              <div className="med-progress-container">
-                <div className="med-progress-info">
-                  <span>Pills: <strong>{med.pillsTaken || 0}</strong> / {med.totalPills || 0}</span>
-                  <span className={`med-remaining ${remaining < 5 ? 'low-stock' : ''}`}>
-                    {remaining < 5 ? `Low stock: ${remaining} left` : `Remaining: ${remaining} pills`}
-                  </span>
+              <div key={med.id} className="med-card" style={{ marginBottom: '16px' }}>
+                <div className="med-header">
+                  <Typography variant="h6" className="med-name">{med.name}</Typography>
+                  <button 
+                    onClick={() => handleDelete(med.id)} 
+                    className="delete-btn" 
+                    aria-label="Delete"
+                    title="Delete medication"
+                  >
+                    ✕
+                  </button>
                 </div>
-                {remaining < 5 && remaining > 0 && (
-                  <div className="low-stock-alert">
-                    ⚠️ Low medication: only {remaining} pills left
+                <div className="med-instruction">{med.instruction}</div>
+                
+                <div className="med-progress-container">
+                  <div className="med-progress-info">
+                    <span>Pills: <strong>{med.pillsTaken || 0}</strong> / {med.totalPills || 0}</span>
+                    <span className={`med-remaining ${remaining < 5 ? 'low-stock' : ''}`}>
+                      {remaining < 5 ? `Low stock: ${remaining} left` : `Remaining: ${remaining} pills`}
+                    </span>
+                  </div>
+                  {remaining < 5 && remaining > 0 && (
+                    <div className="low-stock-alert">
+                      ⚠️ Low medication: only {remaining} pills left
+                    </div>
+                  )}
+                  {remaining === 0 && med.totalPills > 0 && (
+                    <div className="out-of-stock-alert">
+                      🚫 Out of medication!
+                    </div>
+                  )}
+                  <div className="med-meta">
+                    <span className="med-start-date">Started: {med.startDate || 'N/A'}</span>
+                  </div>
+                  <div className="progress-bar-bg">
+                    <div 
+                      className="progress-bar-fill" 
+                      style={{ 
+                        width: `${Math.min(100, ((med.pillsTaken || 0) / (med.totalPills || 1)) * 100)}%` 
+                      }}
+                    ></div>
+                  </div>
+                </div>
+                {med.scheduledTimes && med.scheduledTimes.length > 0 && (
+                  <div className="med-schedule-container" style={{ flexWrap: 'wrap', alignItems: 'flex-start', flexDirection: 'column' }}>
+                    <span className="schedule-label" style={{ marginBottom: '4px' }}>Schedule ⏱:</span>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {med.scheduledTimes.map(time => {
+                        const today = new Date().toISOString().split('T')[0];
+                        const isTaken = med.taken && med.taken[today] && med.taken[today].includes(time);
+                        return (
+                          <button 
+                            key={time} 
+                            title="Click to mark as taken"
+                            className={`take-btn ${isTaken ? 'taken' : ''}`}
+                            onClick={() => handleMarkTaken(med.id, time, med)}
+                            disabled={isTaken}
+                          >
+                            {isTaken ? `✔ ${time} Taken` : `◯ ${time}`}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
-                {remaining === 0 && med.totalPills > 0 && (
-                  <div className="out-of-stock-alert">
-                    🚫 Out of medication!
-                  </div>
-                )}
-                <div className="med-meta">
-                  <span className="med-start-date">Started: {med.startDate || 'N/A'}</span>
-                </div>
-                <div className="progress-bar-bg">
-                  <div 
-                    className="progress-bar-fill" 
-                    style={{ 
-                      width: `${Math.min(100, ((med.pillsTaken || 0) / (med.totalPills || 1)) * 100)}%` 
-                    }}
-                  ></div>
-                </div>
               </div>
-              {med.scheduledTimes && med.scheduledTimes.length > 0 && (
-                <div className="med-schedule-container" style={{ flexWrap: 'wrap', alignItems: 'flex-start', flexDirection: 'column' }}>
-                  <span className="schedule-label" style={{ marginBottom: '4px' }}>Schedule ⏱:</span>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {med.scheduledTimes.map(time => {
-                      const today = new Date().toISOString().split('T')[0];
-                      const isTaken = med.taken && med.taken[today] && med.taken[today].includes(time);
-                      return (
-                        <button 
-                          key={time} 
-                          title="Click to mark as taken"
-                          className={`take-btn ${isTaken ? 'taken' : ''}`}
-                          onClick={() => handleMarkTaken(med.id, time, med)}
-                          disabled={isTaken}
-                        >
-                          {isTaken ? `✔ ${time} Taken` : `◯ ${time}`}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })
-      )}
+            );
+          })
+        )}
     </div>
 
       {activeReminder && (
@@ -317,7 +324,10 @@ function App() {
           </div>
         </div>
       )}
-    </div>
+          </div>
+        </CardContent>
+      </Card>
+    </Container>
   );
 }
 
