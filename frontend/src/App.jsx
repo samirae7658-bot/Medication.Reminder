@@ -7,8 +7,10 @@ import { onSnapshot, collection, addDoc, query, deleteDoc, doc, updateDoc } from
 import { Button, TextField, Container, Card, CardContent, Typography, Box } from "@mui/material";
 import AddMedicationForm from './components/AddMedicationForm';
 import MedicationCard from './components/MedicationCard';
+import MedicationCalendar from './components/MedicationCalendar';
 let sharedAudioCtx = null;
 import ReminderModal from './components/ReminderModal';
+
 
 
 
@@ -56,8 +58,14 @@ function App() {
 
 
   useEffect(() => {
+    // Request notification permission
+    if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+
     // Listen to Firebase "medications" collection in real-time
     const q = query(collection(db, 'medications'));
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const medsData = snapshot.docs.map(document => ({
         ...document.data(),
@@ -89,9 +97,19 @@ function App() {
             const doseId = `${med.id}-${today}-${time}`;
             if (!notifiedMissed.has(doseId)) {
               playBeep();
+              
+              // Mobile/Browser Notification
+              if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("PillAlert: Missed Medication", {
+                  body: `You missed your dose of ${med.name} scheduled for ${time}.`,
+                  icon: "/favicon.ico"
+                });
+              }
+
               console.warn(`Missed medication: ${med.name} at ${time}`);
               setNotifiedMissed(prev => new Set(prev).add(doseId));
             }
+
           }
         });
       });
@@ -205,10 +223,12 @@ function App() {
                 handleSubmit={handleSubmit}
               />
 
+              <MedicationCalendar medications={medications} />
+
               <div className="medications-list" style={{ marginTop: '32px' }}>
-                <Typography variant="h5" component="h3" sx={{ mb: 3 }}>Your Medications</Typography>
+                <Typography variant="h5" component="h3" sx={{ mb: 2, fontWeight: 'bold' }}>Today's Schedule</Typography>
                 {medications.length === 0 ? (
-                  <Typography>No medications added yet</Typography>
+                  <Typography align="center" color="text.secondary" sx={{ py: 4 }}>No medications added yet. Start by adding one above!</Typography>
                 ) : (
                   medications.map(med => (
                     <MedicationCard
@@ -220,6 +240,7 @@ function App() {
                   ))
                 )}
               </div>
+
             </div>
           </CardContent>
         </Card>
