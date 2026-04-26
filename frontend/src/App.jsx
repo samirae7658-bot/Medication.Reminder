@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
 import './index.css';
 import { db } from './firebase';
-import { collection, addDoc, onSnapshot, orderBy, query, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { onSnapshot, collection, addDoc, query, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 
-import { Button, TextField } from "@mui/material";
-import { Container, Card, CardContent, Typography } from "@mui/material";
 
+import { Button, TextField, Container, Card, CardContent, Typography, Box } from "@mui/material";
+import AddMedicationForm from './components/AddMedicationForm';
+import MedicationCard from './components/MedicationCard';
 let sharedAudioCtx = null;
+import ReminderModal from './components/ReminderModal';
+
+
 
 const initAudio = () => {
   if (!sharedAudioCtx) {
@@ -15,7 +19,6 @@ const initAudio = () => {
       sharedAudioCtx = new AudioCtx();
     }
   }
-  // Resume state if suspended (browser autoplay policy requires user interaction)
   if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') {
     sharedAudioCtx.resume();
   }
@@ -44,26 +47,22 @@ const playBeep = () => {
 };
 
 function App() {
-  const [backendMessage, setBackendMessage] = useState('');
   const [formData, setFormData] = useState({ name: '', instruction: '', startDate: '', totalPills: '' });
   const [medications, setMedications] = useState([]);
   const [activeReminder, setActiveReminder] = useState(null);
+  const [missedDoses, setMissedDoses] = useState({}); // { medId: [times] }
+  const [notifiedMissed, setNotifiedMissed] = useState(new Set()); 
+
+
 
   useEffect(() => {
-    // Fetch data from Node.js backend to verify it's up
-    fetch('http://localhost:3001/')
-      .then((res) => res.json())
-      .then((data) => setBackendMessage(data.message))
-      .catch(() => setBackendMessage('Backend offline'));
-
     // Listen to Firebase "medications" collection in real-time
     const q = query(collection(db, 'medications'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const medsData = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id
+      const medsData = snapshot.docs.map(document => ({
+        ...document.data(),
+        id: document.id
       }));
-      // We can sort them here or use orderBy in the query if we had timestamps
       setMedications(medsData);
     }, (err) => {
       console.error("Failed to fetch medications:", err);
@@ -71,6 +70,36 @@ function App() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+
+    // Background check every minute for missed medications
+    const interval = setInterval(() => {
+      const now = new Date();
+      const currentHHmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const today = now.toISOString().split('T')[0];
+
+      medications.forEach(med => {
+        med.scheduledTimes?.forEach(time => {
+          if (time === 'Anytime') return;
+          
+          const isTaken = med.taken?.[today]?.includes(time);
+          if (!isTaken && currentHHmm > time) {
+            // It's missed
+            const doseId = `${med.id}-${today}-${time}`;
+            if (!notifiedMissed.has(doseId)) {
+              playBeep();
+              console.warn(`Missed medication: ${med.name} at ${time}`);
+              setNotifiedMissed(prev => new Set(prev).add(doseId));
+            }
+          }
+        });
+      });
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [medications, notifiedMissed]);
+
 
   const handleDelete = async (id) => {
     try {
@@ -83,15 +112,9 @@ function App() {
 
   const parseSchedule = (instruction) => {
     const text = instruction.toLowerCase();
-    if (text.includes('every 8 hours')) {
-      return ['08:00', '16:00', '00:00'];
-    }
-    if (text.includes('twice a day') || text.includes('twice daily')) {
-      return ['08:00', '20:00'];
-    }
-    if (text.includes('once a day') || text.includes('once daily') || text.includes('daily')) {
-      return ['08:00'];
-    }
+    if (text.includes('every 8 hours')) return ['08:00', '16:00', '00:00'];
+    if (text.includes('twice a day') || text.includes('twice daily')) return ['08:00', '20:00'];
+    if (text.includes('once a day') || text.includes('once daily') || text.includes('daily')) return ['08:00'];
     return [];
   };
 
@@ -105,10 +128,8 @@ function App() {
       newTaken[today] = [];
     }
 
-    // Only update if not already taken at this time
     if (!newTaken[today].includes(time)) {
       newTaken[today].push(time);
-      
       try {
         await updateDoc(doc(db, 'medications', id), {
           taken: newTaken,
@@ -127,15 +148,16 @@ function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    initAudio(); // Initialize audio context during user gesture to comply with browser policies
+    initAudio(); 
     if (!formData.name || !formData.instruction) return;
+
 
     const parsedTimes = parseSchedule(formData.instruction);
 
     try {
       const finalTimes = parsedTimes.length > 0 ? parsedTimes : ['Anytime'];
-
       const currentName = formData.name;
+      
       const docRef = await addDoc(collection(db, 'medications'), {
         name: formData.name,
         instruction: formData.instruction,
@@ -146,8 +168,8 @@ function App() {
         taken: {},
         createdAt: new Date().toISOString()
       });
+
       
-      // Trigger alert for testing within the next 1 minute
       setTimeout(async () => {
         await playBeep();
         setActiveReminder({ id: docRef.id, time: finalTimes[0], name: currentName });
@@ -160,174 +182,55 @@ function App() {
     }
   };
 
+
+
+
+
   return (
-    <Container maxWidth="md" sx={{ mt: 5 }}>
-      <Card sx={{ borderRadius: 4, boxShadow: 6 }}>
-        <CardContent>
-          <div className="app-container">
-            <Typography variant="h4" component="h1" gutterBottom align="center" sx={{ fontWeight: 'bold', color: 'primary.main', mb: 3 }}>
-              PillAlert
-            </Typography>
-                     
+    <>
+      <Container maxWidth="md" sx={{ mt: 5 }}>
+        <Card sx={{ borderRadius: 4, boxShadow: 6 }}>
+          <CardContent>
+            <div className="app-container">
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 3 }}>
+                    <Typography variant="h4" component="h1" gutterBottom align="center" sx={{ fontWeight: 'bold', color: 'primary.main', mb: 0 }}>
+                        PillAlert
+                    </Typography>
+                </Box>
 
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label>Medication Name</label>
-          <TextField
-          fullWidth
-          label="Medication Name"
-          name="name"
-          value={formData.name}
-          onChange={handleChange}
-          margin="normal"
-          /> 
-        </div>
+                       
+              <AddMedicationForm
+                formData={formData}
+                handleChange={handleChange}
+                handleSubmit={handleSubmit}
+              />
 
-        <div className="form-group">
-          <label>Instructions</label>
-          <TextField
-          fullWidth
-          label="Instruction"
-          name="instruction"
-          value={formData.instruction}
-          onChange={handleChange}
-          margin="normal"
-          multiline
-          rows={3}
-          />
-        </div>
-
-        <div className="form-group-row">
-          <div className="form-group">
-            <label>Start Date</label>
-            <input 
-              type="date" 
-              name="startDate" 
-              value={formData.startDate} 
-              onChange={handleChange} 
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Total Pills</label>
-            <input 
-              type="number" 
-              name="totalPills" 
-              placeholder="e.g. 30"
-              value={formData.totalPills} 
-              onChange={handleChange} 
-              required
-            />
-          </div>
-        </div>
-
-        <Button variant="contained" type="submit" fullWidth sx={{ mt: 2 }}>
-         Add Medication
-        </Button>
-      </form>
-
-      <div className="medications-list">
-        <h3>Your Medications</h3>
-        {medications.length === 0 ? (
-          <p style={{ color: 'var(--text)', fontSize: '0.9rem' }}>No medications added yet. Add one above to get started.</p>
-        ) : (
-          medications.map((med) => {
-            const remaining = (med.totalPills || 0) - (med.pillsTaken || 0);
-            return (
-              <div key={med.id} className="med-card" style={{ marginBottom: '16px' }}>
-                <div className="med-header">
-                  <Typography variant="h6" className="med-name">{med.name}</Typography>
-                  <button 
-                    onClick={() => handleDelete(med.id)} 
-                    className="delete-btn" 
-                    aria-label="Delete"
-                    title="Delete medication"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="med-instruction">{med.instruction}</div>
-                
-                <div className="med-progress-container">
-                  <div className="med-progress-info">
-                    <span>Pills: <strong>{med.pillsTaken || 0}</strong> / {med.totalPills || 0}</span>
-                    <span className={`med-remaining ${remaining < 5 ? 'low-stock' : ''}`}>
-                      {remaining < 5 ? `Low stock: ${remaining} left` : `Remaining: ${remaining} pills`}
-                    </span>
-                  </div>
-                  {remaining < 5 && remaining > 0 && (
-                    <div className="low-stock-alert">
-                      ⚠️ Low medication: only {remaining} pills left
-                    </div>
-                  )}
-                  {remaining === 0 && med.totalPills > 0 && (
-                    <div className="out-of-stock-alert">
-                      🚫 Out of medication!
-                    </div>
-                  )}
-                  <div className="med-meta">
-                    <span className="med-start-date">Started: {med.startDate || 'N/A'}</span>
-                  </div>
-                  <div className="progress-bar-bg">
-                    <div 
-                      className="progress-bar-fill" 
-                      style={{ 
-                        width: `${Math.min(100, ((med.pillsTaken || 0) / (med.totalPills || 1)) * 100)}%` 
-                      }}
-                    ></div>
-                  </div>
-                </div>
-                {med.scheduledTimes && med.scheduledTimes.length > 0 && (
-                  <div className="med-schedule-container" style={{ flexWrap: 'wrap', alignItems: 'flex-start', flexDirection: 'column' }}>
-                    <span className="schedule-label" style={{ marginBottom: '4px' }}>Schedule ⏱:</span>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {med.scheduledTimes.map(time => {
-                        const today = new Date().toISOString().split('T')[0];
-                        const isTaken = med.taken && med.taken[today] && med.taken[today].includes(time);
-                        return (
-                          <button 
-                            key={time} 
-                            title="Click to mark as taken"
-                            className={`take-btn ${isTaken ? 'taken' : ''}`}
-                            onClick={() => handleMarkTaken(med.id, time, med)}
-                            disabled={isTaken}
-                          >
-                            {isTaken ? `✔ ${time} Taken` : `◯ ${time}`}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
+              <div className="medications-list" style={{ marginTop: '32px' }}>
+                <Typography variant="h5" component="h3" sx={{ mb: 3 }}>Your Medications</Typography>
+                {medications.length === 0 ? (
+                  <Typography>No medications added yet</Typography>
+                ) : (
+                  medications.map(med => (
+                    <MedicationCard
+                      key={med.id}
+                      med={med}
+                      handleDelete={handleDelete}
+                      handleMarkTaken={handleMarkTaken}
+                    />
+                  ))
                 )}
               </div>
-            );
-          })
-        )}
-    </div>
-
-      {activeReminder && (
-        <div className="reminder-modal-overlay">
-          <div className="reminder-modal">
-            <h3>Reminder!</h3>
-            <p>It's time to take: <strong>{activeReminder.name}</strong></p>
-            <div className="reminder-modal-actions">
-              <button onClick={() => {
-                const med = medications.find(m => m.id === activeReminder.id);
-                if (med) {
-                  handleMarkTaken(activeReminder.id, activeReminder.time, med);
-                }
-                setActiveReminder(null);
-              }}>✔ Mark as taken</button>
-              <button className="cancel-btn" onClick={() => setActiveReminder(null)}>Close</button>
             </div>
-          </div>
-        </div>
-      )}
-          </div>
-        </CardContent>
-      </Card>
-    </Container>
+          </CardContent>
+        </Card>
+      </Container>
+      <ReminderModal 
+        activeReminder={activeReminder} 
+        setActiveReminder={setActiveReminder} 
+        handleMarkTaken={handleMarkTaken} 
+        medications={medications} 
+      />
+    </>
   );
 }
 
